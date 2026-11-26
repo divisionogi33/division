@@ -1,0 +1,112 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Отпуски по години — Division{% endblock %}
+
+{% block stylesheets %}
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+{% endblock %}
+
+{% block body %}
+    <nav class="navbar navbar-dark bg-dark mb-4">
+        <div class="container-fluid px-4">
+            <span class="navbar-brand fw-bold">Отпуски по години</span>
+            <div class="d-flex gap-2">
+                <a href="{{ path('app_admin_dashboard') }}" class="btn btn-sm btn-outline-warning">Назад към Админ</a>
+                <a href="{{ path('app_calendar') }}" class="btn btn-sm btn-outline-light">Календар</a>
+                <a href="{{ path('app_logout') }}" class="btn btn-sm btn-danger">Изход</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid px-4 pb-5">
+        {% for message in app.flashes('success') %}
+            <div class="alert alert-success alert-dismissible fade show">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        {% endfor %}
+
+        <div class="row g-4">
+            {# Форма за задаване на отпуск #}
+            <div class="col-lg-4">
+                <div class="card shadow-sm">
+                    <div class="card-header fw-bold">Задай / коригирай отпуск</div>
+                    <div class="card-body">
+                        <form method="post" action="{{ path('app_admin_leave_set_balance') }}">
+                            <div class="mb-2">
+                                <label class="form-label">Служител</label>
+                                <select name="userId" class="form-select" required>
+                                    <option value="all">-- ВСИЧКИ (зареди на цялата рота) --</option>
+                                    {% for u in users %}
+                                        <option value="{{ u.id }}">{{ u.militaryRank }} {{ u.fullName }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label">Година</label>
+                                <input type="number" name="year" class="form-control" value="{{ currentYear }}" min="2005" max="2050" required>
+
+                            </div>
+                            <div class="row g-2 mb-3">
+                                <div class="col-6">
+                                    <label class="form-label">Полагаеми дни</label>
+                                    <input type="number" name="totalDays" class="form-control" value="30" min="0" required>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label">Ползвани дни</label>
+                                    <input type="number" name="usedDays" class="form-control" value="0" min="0">
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary w-100">Запази</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            {# Таблица с остатъците на цялата рота #}
+            <div class="col-lg-8">
+                <div class="card shadow-sm">
+                    <div class="card-header fw-bold">Оставащ отпуск по личен състав</div>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                            <tr>
+                                <th>Служител</th>
+                                <th>По години (остават / общо)</th>
+                                <th class="text-end">Общо остават</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            {% for u in users %}
+                                {% set uBals = balancesByUser[u.id]|default([]) %}
+                                {% set totalRem = 0 %}
+                                <tr>
+                                    <td>
+                                        <div class="fw-semibold">{{ u.militaryRank }} {{ u.fullName }}</div>
+                                        <small class="text-muted">{{ u.position }}</small>
+                                    </td>
+                                    <td>
+                                        {% for b in uBals %}
+                                            {% set totalRem = totalRem + b.remainingDays %}
+                                            <span class="badge {{ b.remainingDays > 0 ? 'bg-success' : 'bg-secondary' }} me-1">
+                                                {{ b.year }} г.: {{ b.remainingDays }} / {{ b.totalDays }} д.
+                                            </span>
+                                        {% else %}
+                                            <span class="text-muted small">Няма зададени дни</span>
+                                        {% endfor %}
+                                    </td>
+                                    <td class="text-end fw-bold fs-6 text-primary">{{ totalRem }} д.</td>
+                                </tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block javascripts %}
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+{% endblock %}

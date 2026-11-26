@@ -1,0 +1,54 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Регистрация — Division{% endblock %}
+
+{% block stylesheets %}
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+{% endblock %}
+
+{% block body %}
+    <div class="container d-flex justify-content-center align-items-center min-vh-100 py-4">
+        <div class="card shadow-sm p-4" style="max-width: 420px; width: 100%;">
+            <h4 class="text-center fw-bold mb-3">Регистрация</h4>
+
+            {% if error %}
+                <div class="alert alert-danger py-2">{{ error }}</div>
+            {% endif %}
+
+            <form method="post">
+                <div class="row g-2 mb-3">
+                    <div class="col">
+                        <label class="form-label">Име</label>
+                        <input type="text" name="firstName" class="form-control" required>
+                    </div>
+                    <div class="col">
+                        <label class="form-label">Фамилия</label>
+                        <input type="text" name="lastName" class="form-control" required>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Звание</label>
+                    <input type="text" name="militaryRank" class="form-control" placeholder="напр. ст. сержант, капитан" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Длъжност</label>
+                    <input type="text" name="position" class="form-control" placeholder="напр. Оператор РЛС" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Имейл</label>
+                    <input type="email" name="email" class="form-control" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Парола</label>
+                    <input type="password" name="password" class="form-control" minlength="6" required>
+                </div>
+
+                <button class="btn btn-primary w-100 mb-2" type="submit">Създай акаунт</button>
+            </form>
+
+            <div class="text-center mt-2">
+                <a href="{{ path('app_login') }}" class="text-decoration-none">Вече имаш акаунт? Вход</a>
+            </div>
+        </div>
+    </div>
+{% endblock %}

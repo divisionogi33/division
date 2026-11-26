@@ -1,0 +1,360 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Division — Военен споделен календар{% endblock %}
+
+{% block stylesheets %}
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f4f6f9; }
+        #calendar { background: #fff; padding: 16px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+        .task-done { text-decoration: line-through; color: #6c757d; }
+    </style>
+{% endblock %}
+
+{% block body %}
+    <nav class="navbar navbar-dark bg-dark mb-4">
+        <div class="container-fluid px-4">
+            <span class="navbar-brand fw-bold">Division Calendar</span>
+            <div class="d-flex gap-2 align-items-center">
+                {% if is_granted('ROLE_ADMIN') %}
+                    <a href="{{ path('app_admin_dashboard') }}" class="btn btn-sm btn-outline-warning">Админ панел</a>
+                {% endif %}
+                <a href="{{ path('app_logout') }}" class="btn btn-sm btn-outline-light">Изход</a>
+                <span class="badge bg-warning text-dark fs-6">
+                    Батарея общо: {{ batteryTotalHours }} ч.
+                </span>
+                {% if not hasData %}
+                    <a href="{{ path('app_seed_demo') }}" class="btn btn-sm btn-success">
+                        + Зареди тестови данни
+                    </a>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid px-4 pb-5">
+        <div class="row g-4">
+            {# Лява колона: Календар + Легенда #}
+            <div class="col-lg-8">
+                <div class="mb-3 d-flex flex-wrap gap-2">
+                    {% for item in legends %}
+                        <span class="badge" style="background-color: {{ item.colorHex }}; font-size: 0.9rem;">
+                            {{ item.code }} — {{ item.name }} ({{ item.defaultDailyHours }} ч./ден)
+                        </span>
+                    {% endfor %}
+                </div>
+                <div id="calendar"></div>
+            </div>
+
+            {# Дясна колона: Индивидуални часове + Отпуск/Болничен + Задачи #}
+            <div class="col-lg-4">
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span class="fw-bold">Часове за {{ currentMonth }}</span>
+                        <span class="badge bg-info text-dark">Норма: {{ normHours }} ч.</span>
+                    </div>
+                    <ul class="list-group list-group-flush">
+                        {% for row in individualHours %}
+                            {% set diff = normHours - row.hours %}
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <div>
+                                    <div class="fw-semibold">{{ row.name }}</div>
+                                    <small class="text-muted">{{ row.position }}</small>
+                                </div>
+                                <div class="text-end">
+                                    <span class="badge bg-primary rounded-pill fs-6">{{ row.hours }} ч.</span>
+                                    <div class="small mt-1">
+                                        {% if diff > 0 %}
+                                            <span class="text-danger">остават {{ diff }} ч.</span>
+                                        {% elseif diff < 0 %}
+                                            <span class="text-success">+{{ diff|abs }} ч. над норма</span>
+                                        {% else %}
+                                            <span class="text-success">Норма</span>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </li>
+                        {% else %}
+                            <li class="list-group-item text-muted">Няма разпределени смени за месеца.</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+
+                {% if not is_granted('ROLE_ADMIN') %}
+                    {# 2. Заяви отпуск / болничен #}
+                    <div class="card shadow-sm mb-4">
+                        <div class="card-header fw-bold">Заяви отпуск / болничен</div>
+                        <div class="card-body">
+                            <div class="mb-2 p-2 bg-light rounded border small">
+                                <div class="fw-semibold mb-1">Оставаща отпуска по години:</div>
+                                {% for b in myLeaveBalances %}
+                                    <span class="badge {{ b.remainingDays > 0 ? 'bg-success' : 'bg-secondary' }} me-1">
+                                        {{ b.year }} г.: {{ b.remainingDays }} / {{ b.totalDays }} д.
+                                    </span>
+                                {% else %}
+                                    <span class="text-muted">Няма въведени дни от админ.</span>
+                                {% endfor %}
+                            </div>
+
+                            <form method="post" action="{{ path('app_leave_request') }}">
+                                <div class="mb-2">
+                                    <select name="type" id="leaveTypeSelect" class="form-select form-select-sm" required>
+                                        <option value="О">Отпуск (О)</option>
+                                        <option value="Б">Болничен (Б)</option>
+                                    </select>
+                                </div>
+
+                                {# Показва се само при Отпуск (О) #}
+                                <div class="mb-2" id="leaveYearWrapper">
+                                    <select name="leaveYear" class="form-select form-select-sm">
+                                        <option value="">-- За коя година (по избор / автоматично) --</option>
+                                        {% for b in myLeaveBalances %}
+                                            {% if b.remainingDays > 0 %}
+                                                <option value="{{ b.year }}">
+                                                    От {{ b.year }} г. (остават {{ b.remainingDays }} д.)
+                                                </option>
+                                            {% endif %}
+                                        {% endfor %}
+                                    </select>
+                                </div>
+
+                                <div class="row g-2 mb-2">
+                                    <div class="col">
+                                        <input type="date" name="startDate" id="leaveStartDate" class="form-control form-control-sm" required>
+                                    </div>
+                                    <div class="col">
+                                        <input type="date" name="endDate" id="leaveEndDate" class="form-control form-control-sm" required>
+                                    </div>
+                                </div>
+
+                                {# Показва се само при Болничен (Б) #}
+                                <div class="mb-2 d-none" id="sickNoteWrapper">
+                                    <input type="text" name="reason" id="sickNoteInput" class="form-control form-control-sm" placeholder="№ болничен лист / бележка">
+                                </div>
+
+                                <button type="submit" class="btn btn-sm btn-outline-primary w-100">Изпрати заявка</button>
+
+                                {% for message in app.flashes('success') %}
+                                    <div class="alert alert-success alert-dismissible fade show py-2 small mt-2 mb-0" role="alert">
+                                        {{ message }}
+                                        <button type="button" class="btn-close btn-sm" data-bs-dismiss="alert"></button>
+                                    </div>
+                                {% endfor %}
+                                {% for message in app.flashes('error') %}
+                                    <div class="alert alert-danger alert-dismissible fade show py-2 small mt-2 mb-0" role="alert">
+                                        {{ message }}
+                                        <button type="button" class="btn-close btn-sm" data-bs-dismiss="alert"></button>
+                                    </div>
+                                {% endfor %}
+                            </form>
+
+                            {% if myLeaves is not empty %}
+                                <hr class="my-2">
+                                <div class="small fw-semibold mb-1">Последни заявки:</div>
+                                {% for lv in myLeaves %}
+                                    <div class="d-flex justify-content-between align-items-center small mb-1">
+                                        <span>
+                                            <strong>{{ lv.type == 'О' ? 'Отпуск' : 'Болничен' }}</strong>
+                                            {% if lv.leaveYear %}<small class="text-muted">({{ lv.leaveYear }} г.)</small>{% endif %}
+                                            {{ lv.startDate|date('d.m') }}–{{ lv.endDate|date('d.m') }}
+                                        </span>
+                                        {% if lv.status == 'approved' %}
+                                            <span class="badge bg-success">Одобрена</span>
+                                        {% elseif lv.status == 'rejected' %}
+                                            <span class="badge bg-danger">Отказана</span>
+                                        {% else %}
+                                            <span class="badge bg-warning text-dark">Чака</span>
+                                        {% endif %}
+                                    </div>
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+                    </div>
+                {% endif %}
+
+                {# 3. Задачи #}
+                <div class="card shadow-sm">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span class="fw-bold">Задачи</span>
+                        <div class="btn-group btn-group-sm">
+                            <a href="{{ path('app_calendar', {filter: 'today'}) }}" class="btn {{ currentFilter == 'today' ? 'btn-dark' : 'btn-outline-dark' }}">Днес</a>
+                            <a href="{{ path('app_calendar', {filter: 'week'}) }}" class="btn {{ currentFilter == 'week' ? 'btn-dark' : 'btn-outline-dark' }}">Седмица</a>
+                            <a href="{{ path('app_calendar', {filter: 'all'}) }}" class="btn {{ currentFilter == 'all' ? 'btn-dark' : 'btn-outline-dark' }}">Всички</a>
+                        </div>
+                    </div>
+                    <ul class="list-group list-group-flush">
+                        {% for task in tasks %}
+                            <li class="list-group-item d-flex justify-content-between align-items-start gap-2">
+                                <div class="flex-grow-1">
+                                    <div class="task-title fw-semibold {% if task.isCompleted %}task-done{% endif %}">
+                                        {{ task.title }}
+                                    </div>
+                                    {% if task.description %}
+                                        <div class="small text-secondary">{{ task.description }}</div>
+                                    {% endif %}
+                                    <small class="text-muted">
+                                        {{ task.assignedTo.fullName }}
+                                        {% if task.dueDate %} • до {{ task.dueDate|date('d.m.Y H:i') }}{% endif %}
+                                    </small>
+                                    <div class="task-note small text-success mt-1">
+                                        {% if task.completionNote %}Бележка: {{ task.completionNote }}{% endif %}
+                                    </div>
+                                </div>
+                                <div class="task-action text-end">
+                                    {% if task.isCompleted %}
+                                        <span class="badge bg-success">Изпълнена</span>
+                                    {% else %}
+                                        <button
+                                            type="button"
+                                            class="btn btn-sm btn-outline-success complete-task-btn"
+                                            data-id="{{ task.id }}"
+                                        >
+                                            Приключи
+                                        </button>
+                                    {% endif %}
+                                </div>
+                            </li>
+                        {% else %}
+                            <li class="list-group-item text-muted small">Няма задачи за този период.</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="completeTaskModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Приключване на задача</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <label class="form-label">Бележка за изпълнението (обратна връзка):</label>
+                    <textarea id="taskCompletionNote" class="form-control" rows="3" placeholder="напр. Сменен предпазител, всичко е в норма..."></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отказ</button>
+                    <button type="button" class="btn btn-success" id="confirmCompleteBtn">Отбележи като свършена</button>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block javascripts %}
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const calendarEl = document.getElementById('calendar');
+            const calendar = new FullCalendar.Calendar(calendarEl, {
+                initialView: 'dayGridMonth',
+                locale: 'bg',
+                firstDay: 1,
+                headerToolbar: {
+                    left: 'prev,next today',
+                    center: 'title',
+                    right: 'dayGridMonth,listWeek'
+                },
+                events: '{{ path('api_calendar_events') }}'
+            });
+            calendar.render();
+
+            // Отпуск (О) vs Болничен (Б) + ограничаване на датите
+            const leaveTypeSelect = document.getElementById('leaveTypeSelect');
+            const leaveYearWrapper = document.getElementById('leaveYearWrapper');
+            const sickNoteWrapper = document.getElementById('sickNoteWrapper');
+            const sickNoteInput = document.getElementById('sickNoteInput');
+            const startInput = document.getElementById('leaveStartDate');
+            const endInput = document.getElementById('leaveEndDate');
+
+            const formatDate = (d) => {
+                const y = d.getFullYear();
+                const m = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                return `${y}-${m}-${day}`;
+            };
+
+            const getMinSickDate = () => {
+                const d = new Date();
+                let workingDays = 0;
+                while (workingDays < 2) {
+                    d.setDate(d.getDate() - 1);
+                    const day = d.getDay();
+                    if (day !== 0 && day !== 6) workingDays++;
+                }
+                return formatDate(d);
+            };
+
+            if (leaveTypeSelect && startInput && endInput) {
+                const toggleLeaveFields = () => {
+                    const isSick = leaveTypeSelect.value === 'Б';
+                    sickNoteWrapper.classList.toggle('d-none', !isSick);
+                    leaveYearWrapper.classList.toggle('d-none', isSick);
+                    if (!isSick) {
+                        sickNoteInput.value = '';
+                    }
+
+                    const minDate = isSick ? getMinSickDate() : formatDate(new Date());
+                    startInput.min = minDate;
+                    endInput.min = startInput.value && startInput.value > minDate ? startInput.value : minDate;
+                };
+
+                startInput.addEventListener('change', () => {
+                    if (startInput.value) {
+                        endInput.min = startInput.value;
+                        if (endInput.value && endInput.value < startInput.value) {
+                            endInput.value = startInput.value;
+                        }
+                    }
+                });
+
+                leaveTypeSelect.addEventListener('change', toggleLeaveFields);
+                toggleLeaveFields();
+            }
+
+            // Модал за приключване на задача с обратна връзка (еднопосочно)
+            const modalEl = document.getElementById('completeTaskModal');
+            const modal = new bootstrap.Modal(modalEl);
+            const noteInput = document.getElementById('taskCompletionNote');
+            const confirmBtn = document.getElementById('confirmCompleteBtn');
+            let activeBtn = null;
+
+            document.querySelectorAll('.complete-task-btn').forEach(btn => {
+                btn.addEventListener('click', function () {
+                    activeBtn = this;
+                    noteInput.value = '';
+                    modal.show();
+                });
+            });
+
+            confirmBtn.addEventListener('click', async function () {
+                if (!activeBtn) return;
+                const btn = activeBtn;
+                activeBtn = null;
+                modal.hide();
+
+                const id = btn.dataset.id;
+                const li = btn.closest('li');
+                const titleEl = li.querySelector('.task-title');
+                const noteEl = li.querySelector('.task-note');
+                const actionEl = li.querySelector('.task-action');
+
+                const res = await fetch(`/api/tasks/${id}/toggle`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ note: noteInput.value })
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    titleEl.classList.add('task-done');
+                    noteEl.textContent = data.completionNote ? `Бележка: ${data.completionNote}` : '';
+                    actionEl.innerHTML = '<span class="badge bg-success">Изпълнена</span>';
+                }
+            });
+        });
+    </script>
+{% endblock %}

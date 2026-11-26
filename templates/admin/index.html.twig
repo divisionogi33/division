@@ -1,0 +1,515 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Админ панел — Division{% endblock %}
+
+{% block stylesheets %}
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f4f6f9; }
+        .chart-wrapper {
+            position: relative;
+            height: 380px;
+            width: 100%;
+        }
+        .ai-grid-table th, .ai-grid-table td {
+            padding: 3px 4px !important;
+            vertical-align: middle;
+            font-size: 0.76rem;
+        }
+        .ai-shift-badge {
+            display: inline-block;
+            padding: 2px 5px;
+            border-radius: 4px;
+            color: #fff;
+            font-weight: 600;
+            font-size: 0.7rem;
+            line-height: 1.1;
+            margin: 1px 0;
+        }
+    </style>
+{% endblock %}
+
+{% block body %}
+    <nav class="navbar navbar-dark bg-dark mb-4">
+        <div class="container-fluid px-4">
+            <span class="navbar-brand fw-bold">Админ панел — Division</span>
+            <div class="d-flex flex-wrap gap-2">
+                <a href="{{ path('app_admin_users') }}" class="btn btn-sm btn-outline-info">Потребители и роли</a>
+                <a href="{{ path('app_admin_legends') }}" class="btn btn-sm btn-outline-success">Типове смени</a>
+                <a href="{{ path('app_admin_report') }}" class="btn btn-sm btn-outline-warning">Справка рота</a>
+                <a href="{{ path('app_admin_tasks') }}" class="btn btn-sm btn-outline-primary">Задачи</a>
+                <a href="{{ path('app_admin_leaves') }}" class="btn btn-sm btn-outline-light">Отпуски</a>
+                <a href="{{ path('app_calendar') }}" class="btn btn-sm btn-outline-light">Към календара</a>
+                <a href="{{ path('app_logout') }}" class="btn btn-sm btn-danger">Изход</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid px-4 pb-5">
+        {% for message in app.flashes('success') %}
+            <div class="alert alert-success alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        {% endfor %}
+
+        {% if pendingLeaves is not empty %}
+            <div class="card border-warning shadow-sm mb-4">
+                <div class="card-header bg-warning text-dark fw-bold">
+                    Чакащи заявки за отпуск / болничен ({{ pendingLeaves|length }})
+                </div>
+                <ul class="list-group list-group-flush">
+                    {% for lv in pendingLeaves %}
+                        {% set info = pendingLeaveInfo[lv.id] %}
+                        <li class="list-group-item d-flex justify-content-between align-items-center flex-wrap gap-2">
+                            <div>
+                                <span class="badge {{ lv.type == 'Б' ? 'text-white' : 'bg-success' }}" style="{{ lv.type == 'Б' ? 'background:#6f42c1;' : '' }}">
+                                    {{ lv.type == 'Б' ? 'Болничен' : 'Отпуск' }}
+                                </span>
+                                <strong>{{ lv.user.militaryRank }} {{ lv.user.fullName }}</strong>
+                                — {{ lv.startDate|date('d.m.Y') }} до {{ lv.endDate|date('d.m.Y') }}
+                                <span class="badge bg-dark ms-1">{{ info.workingDays }} раб. дни</span>
+                                {% if lv.leaveYear %}
+                                    <span class="badge bg-primary ms-1">от {{ lv.leaveYear }} г.</span>
+                                {% endif %}
+                                {% if lv.reason %}<small class="text-muted ms-1">({{ lv.reason }})</small>{% endif %}
+
+                                {% if lv.type == 'О' %}
+                                    <div class="small mt-1">
+                                        {% if lv.leaveYear %}
+                                            {% set found = false %}
+                                            {% for b in info.balances %}
+                                                {% if b.year == lv.leaveYear %}
+                                                    {% set found = true %}
+                                                    <span class="text-muted">Налична за {{ b.year }} г.:</span>
+                                                    <span class="badge {{ b.remainingDays >= info.workingDays ? 'bg-info text-dark' : 'bg-danger' }}">
+                                                        {{ b.remainingDays }} / {{ b.totalDays }} д.
+                                                    </span>
+                                                {% endif %}
+                                            {% endfor %}
+                                            {% if not found %}
+                                                <span class="badge bg-danger">Няма заредени дни за {{ lv.leaveYear }} г.</span>
+                                            {% endif %}
+                                        {% else %}
+                                            {% set totalRem = 0 %}
+                                            {% for b in info.balances %}{% set totalRem = totalRem + b.remainingDays %}{% endfor %}
+                                            <span class="text-muted">Автоматично (общо налични):</span>
+                                            <span class="badge bg-info text-dark">{{ totalRem }} д.</span>
+                                        {% endif %}
+                                    </div>
+                                {% endif %}
+                            </div>
+                            <div class="d-flex gap-1">
+                                <form method="post" action="{{ path('app_admin_leave_approve', {id: lv.id}) }}">
+                                    <button class="btn btn-sm btn-success">Одобри</button>
+                                </form>
+                                <form method="post" action="{{ path('app_admin_leave_reject', {id: lv.id}) }}">
+                                    <button class="btn btn-sm btn-outline-danger">Откажи</button>
+                                </form>
+                            </div>
+                        </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        {% endif %}
+
+        {# Ред 1: Двете форми една до друга #}
+        <div class="row g-4 mb-4">
+            {# 1. Определяне на графика (Смени) #}
+            <div class="col-lg-6">
+                <div class="card shadow-sm h-100">
+                    <div class="card-header bg-white fw-bold">Определи график (Смяна / Командировка)</div>
+                    <div class="card-body">
+                        <form method="post" action="{{ path('app_admin_shift_create') }}">
+                            <div class="mb-2">
+                                <label class="form-label">Служител</label>
+                                <select name="userId" class="form-select" required>
+                                    {% for u in regularUsers %}
+                                        <option value="{{ u.id }}">{{ u.militaryRank }} {{ u.fullName }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label">Тип (Легенда)</label>
+                                <select name="legendId" class="form-select" required>
+                                    {% for l in legends %}
+                                        <option value="{{ l.id }}">[{{ l.code }}] {{ l.name }} ({{ l.defaultDailyHours }} ч./ден)</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="row g-2 mb-2">
+                                <div class="col">
+                                    <label class="form-label">От дата</label>
+                                    <input type="date" name="startDate" class="form-control" required>
+                                </div>
+                                <div class="col">
+                                    <label class="form-label">До дата</label>
+                                    <input type="date" name="endDate" class="form-control" required>
+                                </div>
+                            </div>
+                            <div class="row g-2 mb-3">
+                                <div class="col-7">
+                                    <label class="form-label">Място</label>
+                                    <select name="location" class="form-select">
+                                        <option value="Плевен">Плевен</option>
+                                        <option value="Емона">Емона</option>
+                                        <option value="Друго">Друго</option>
+                                    </select>
+                                </div>
+                                <div class="col-5">
+                                    <label class="form-label">Часове (опц.)</label>
+                                    <input type="number" step="0.5" min="0" name="customHours" class="form-control" placeholder="Авто">
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-success w-100">Добави в графика</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            {# 2. Разпределяне на задача #}
+            <div class="col-lg-6">
+                <div class="card shadow-sm h-100">
+                    <div class="card-header bg-white fw-bold">Разпредели нова задача</div>
+                    <div class="card-body">
+                        <form method="post" action="{{ path('app_admin_task_create') }}">
+                            <div class="mb-2">
+                                <label class="form-label">Изпълнител</label>
+                                <select name="assignedTo" class="form-select" required>
+                                    {% for u in regularUsers %}
+                                        <option value="{{ u.id }}">{{ u.militaryRank }} {{ u.fullName }} ({{ u.position }})</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label">Заглавие</label>
+                                <input type="text" name="title" class="form-control" required>
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label">Описание</label>
+                                <textarea name="description" class="form-control" rows="2"></textarea>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">За кога (дата и час)</label>
+                                <input type="datetime-local" name="dueDate" class="form-control" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary w-100">Възложи задача</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {# Ред 2: Голяма центрирана графика с работните часове + Gemini AI #}
+        <div class="card shadow-sm">
+            <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
+                <span class="fw-bold fs-5">Натовареност — Работни часове по личен състав</span>
+                <div class="d-flex flex-wrap gap-2 align-items-center">
+                    <button type="button" class="btn btn-sm btn-primary" id="btnAiAnalyze">
+                        AI Анализ (Часове + Задачи)
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-dark" id="btnAiSchedule">
+                        AI Предложение за график
+                    </button>
+                    <span class="badge bg-primary-subtle text-primary fs-6">Служители: {{ hoursStats|length }}</span>
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="aiResultBox" class="alert alert-light border shadow-sm d-none mb-4">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                        <strong id="aiResultTitle" class="text-primary">AI Анализ (Gemini)</strong>
+                        <div class="d-flex align-items-center gap-2">
+                            <button type="button" class="btn btn-sm btn-success d-none" id="btnApplyAiSchedule">
+                                Приложи графика в базата
+                            </button>
+                            <button type="button" class="btn-close btn-sm" id="btnCloseAiBox"></button>
+                        </div>
+                    </div>
+                    <div id="aiResultContent" style="font-size: 0.92rem;"></div>
+                </div>
+
+                <div class="chart-wrapper mb-4">
+                    <canvas id="hoursChart"></canvas>
+                </div>
+
+                <div class="row g-2">
+                    {% for stat in hoursStats %}
+                        <div class="col-sm-6 col-md-4 col-lg-3">
+                            <div class="d-flex justify-content-between align-items-center border rounded px-3 py-2 bg-light">
+                                <span class="small fw-semibold text-truncate me-2" title="{{ stat.name }}">{{ stat.name }}</span>
+                                <span class="badge bg-primary">{{ stat.hours }} ч.</span>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block javascripts %}
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const chartEl = document.getElementById('hoursChart');
+            if (chartEl) {
+                const stats = {{ hoursStats|json_encode|raw }};
+                const maxHours = Math.max(...stats.map(s => s.hours), 1);
+
+                new Chart(chartEl, {
+                    type: 'bar',
+                    data: {
+                        labels: stats.map(s => s.name),
+                        datasets: [{
+                            label: 'Отработени часове',
+                            data: stats.map(s => s.hours),
+                            backgroundColor: stats.map(s => s.hours >= 160 ? '#dc3545' : (s.hours >= 130 ? '#0d6efd' : '#198754')),
+                            borderRadius: 6,
+                            maxBarThickness: 32
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                callbacks: {
+                                    label: ctx => ` ${ctx.parsed.y} ч.`
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                ticks: {
+                                    autoSkip: false,
+                                    maxRotation: 45,
+                                    minRotation: 35,
+                                    font: { size: 11 }
+                                },
+                                grid: { display: false }
+                            },
+                            y: {
+                                beginAtZero: true,
+                                suggestedMax: Math.ceil((maxHours + 16) / 20) * 20,
+                                title: {
+                                    display: true,
+                                    text: 'Часове'
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            const aiBox = document.getElementById('aiResultBox');
+            const aiTitle = document.getElementById('aiResultTitle');
+            const aiContent = document.getElementById('aiResultContent');
+            const btnApply = document.getElementById('btnApplyAiSchedule');
+
+            let lastAiScheduleData = null;
+
+            document.getElementById('btnCloseAiBox')?.addEventListener('click', () => {
+                aiBox.classList.add('d-none');
+                btnApply.classList.add('d-none');
+            });
+
+            function escapeHtml(str) {
+                return String(str ?? '')
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;');
+            }
+
+            function renderAiScheduleGrid(data) {
+                const legends = data.legendsMeta || {};
+                const daysMeta = data.daysMeta || {};
+                const usersMap = data.usersMap || {};
+
+                let html = '';
+
+                if (data.summary) {
+                    html += `<div class="alert alert-info py-2 px-3 small mb-2">${escapeHtml(data.summary)}</div>`;
+                }
+
+                // Легенда с цветове
+                html += `<div class="d-flex flex-wrap gap-1 mb-2">`;
+                Object.values(legends).forEach(l => {
+                    html += `<span class="badge" style="background:${escapeHtml(l.color)};">${escapeHtml(l.code)} — ${escapeHtml(l.name)} (${l.hours} ч.)</span>`;
+                });
+                html += `</div>`;
+
+                html += `<div class="table-responsive"><table class="table table-bordered table-sm align-middle text-center bg-white mb-0 ai-grid-table">`;
+                html += `<thead class="table-light"><tr><th class="text-start" style="min-width:190px;">Звание, Име и Фамилия</th>`;
+
+                for (let d = 1; d <= data.daysInMonth; d++) {
+                    const dm = daysMeta[d] || {};
+                    const isRed = dm.isWeekend || dm.holidayName;
+                    const titleAttr = dm.holidayName ? ` title="${escapeHtml(dm.holidayName)}"` : '';
+                    html += `<th class="${isRed ? 'text-danger bg-danger-subtle' : ''}"${titleAttr}>${d}</th>`;
+                }
+                html += `<th class="bg-primary text-white">Часове</th><th class="bg-dark text-white">До норма</th></tr></thead><tbody>`;
+
+                (data.schedule || []).forEach(row => {
+                    const user = usersMap[row.userId] || { name: `Служител #${row.userId}`, position: '' };
+                    let totalHours = 0;
+                    let excusedDays = 0;
+
+                    html += `<tr><td class="text-start text-nowrap"><strong>${escapeHtml(user.name)}</strong>`;
+                    if (user.position) {
+                        html += `<br><small class="text-muted">${escapeHtml(user.position)}</small>`;
+                    }
+                    html += `</td>`;
+
+                    for (let d = 1; d <= data.daysInMonth; d++) {
+                        const dm = daysMeta[d] || {};
+                        const isRed = dm.isWeekend || dm.holidayName;
+                        const rawVal = String(row.days?.[String(d)] || '').trim();
+
+                        if (!rawVal) {
+                            html += `<td class="${isRed ? 'bg-light' : ''}"></td>`;
+                            continue;
+                        }
+
+                        const codes = [...new Set(rawVal.split(/[\/,;\s+]+/).map(c => c.trim().toUpperCase()).filter(Boolean))];
+                        let badgesHtml = '';
+                        let hasExcused = false;
+
+                        codes.forEach(code => {
+                            const leg = legends[code];
+                            const color = leg ? leg.color : '#6c757d';
+                            totalHours += leg ? Number(leg.hours || 0) : 0;
+                            if (code === 'О' || code === 'Б') {
+                                hasExcused = true;
+                            }
+                            badgesHtml += `<div><span class="ai-shift-badge" style="background:${escapeHtml(color)};">${escapeHtml(code)}</span></div>`;
+                        });
+
+                        if (hasExcused && !isRed) {
+                            excusedDays++;
+                        }
+
+                        html += `<td class="${isRed ? 'bg-light' : ''}">${badgesHtml}</td>`;
+                    }
+
+                    const personalNorm = Math.max(0, Number(data.normHours || 0) - excusedDays * 8);
+                    const diff = totalHours - personalNorm;
+                    let diffHtml;
+                    if (diff === 0) {
+                        diffHtml = `<span class="badge bg-success">Норма</span>`;
+                    } else if (diff > 0) {
+                        diffHtml = `<span class="text-success fw-bold">+${diff} ч.</span>`;
+                    } else {
+                        diffHtml = `<span class="text-danger fw-bold">${diff} ч.</span>`;
+                    }
+
+                    html += `<td class="fw-bold text-primary text-nowrap">${totalHours} ч.</td><td class="text-nowrap">${diffHtml}</td></tr>`;
+                });
+
+                html += `</tbody></table></div>`;
+                return html;
+            }
+
+            // 1. Текстов AI анализ
+            document.getElementById('btnAiAnalyze')?.addEventListener('click', async function () {
+                const btn = this;
+                const origText = btn.textContent;
+                btn.disabled = true;
+                btn.textContent = 'Анализира...';
+                btnApply.classList.add('d-none');
+                lastAiScheduleData = null;
+
+                aiBox.classList.remove('d-none');
+                aiTitle.textContent = 'AI Анализ на натовареността (Часове + Задачи)';
+                aiContent.style.whiteSpace = 'pre-wrap';
+                aiContent.innerHTML = '<div class="text-muted">Изпращане на данните към Gemini API...</div>';
+
+                try {
+                    const res = await fetch('{{ path('app_admin_ai_analyze') }}', { method: 'POST' });
+                    const data = await res.json();
+                    if (data.ok) {
+                        aiContent.textContent = data.text;
+                    } else {
+                        aiContent.innerHTML = `<div class="text-danger">Грешка: ${escapeHtml(data.error)}</div>`;
+                    }
+                } catch (err) {
+                    aiContent.innerHTML = `<div class="text-danger">Мрежова грешка: ${escapeHtml(err.message)}</div>`;
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = origText;
+                }
+            });
+
+            // 2. Визуално AI предложение за график (матрица)
+            document.getElementById('btnAiSchedule')?.addEventListener('click', async function () {
+                const btn = this;
+                const origText = btn.textContent;
+                btn.disabled = true;
+                btn.textContent = 'Генерира график...';
+                btnApply.classList.add('d-none');
+                lastAiScheduleData = null;
+
+                aiBox.classList.remove('d-none');
+                aiTitle.textContent = 'AI Предложение за график за следващия месец';
+                aiContent.style.whiteSpace = 'normal';
+                aiContent.innerHTML = '<div class="text-muted">Gemini изчислява графика по дни... (5–15 сек.)</div>';
+
+                try {
+                    const res = await fetch('{{ path('app_admin_ai_suggest_schedule') }}', { method: 'POST' });
+                    const data = await res.json();
+                    if (res.ok && data.ok) {
+                        lastAiScheduleData = data;
+                        aiTitle.textContent = `AI Предложение за график ${data.targetMonthLabel} (Норма: ${data.workingDays} раб. дни / ${data.normHours} ч.)`;
+                        aiContent.innerHTML = renderAiScheduleGrid(data);
+                        btnApply.textContent = `Приложи графика за ${data.targetMonthLabel}`;
+                        btnApply.classList.remove('d-none');
+                    } else {
+                        aiContent.innerHTML = `<div class="text-danger">Грешка: ${escapeHtml(data.error || 'Неуспешно генериране')}</div>`;
+                    }
+                } catch (err) {
+                    aiContent.innerHTML = `<div class="text-danger">Мрежова грешка: ${escapeHtml(err.message)}</div>`;
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = origText;
+                }
+            });
+
+            // 3. Прилагане на предложения график в базата
+            btnApply?.addEventListener('click', async function () {
+                if (!lastAiScheduleData) return;
+                if (!confirm(`Да запиша ли предложения график за ${lastAiScheduleData.targetMonthLabel}? Това ще замени съществуващите смени за този месец.`)) {
+                    return;
+                }
+
+                const origText = btnApply.textContent;
+                btnApply.disabled = true;
+                btnApply.textContent = 'Записване...';
+
+                try {
+                    const res = await fetch('{{ path('app_admin_ai_apply_schedule') }}', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            targetMonth: lastAiScheduleData.targetMonth,
+                            schedule: lastAiScheduleData.schedule
+                        })
+                    });
+                    const data = await res.json();
+                    if (res.ok && data.ok) {
+                        alert(data.message);
+                        window.location.href = data.redirectUrl;
+                    } else {
+                        alert('Грешка при запис: ' + (data.error || 'Неизвестна грешка'));
+                    }
+                } catch (err) {
+                    alert('Мрежова грешка: ' + err.message);
+                } finally {
+                    btnApply.disabled = false;
+                    btnApply.textContent = origText;
+                }
+            });
+        });
+    </script>
+{% endblock %}
