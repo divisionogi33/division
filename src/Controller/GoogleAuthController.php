@@ -103,19 +103,48 @@ class GoogleAuthController extends AbstractController
             return $this->redirectToRoute('app_login');
         }
 
-        // 3. Търсим съществуващ потребител или създаваме нов
+        // 3. Подготвяме име и фамилия от Google (с резервен вариант)
+        $firstName = trim((string) ($googleUser['given_name'] ?? ''));
+        $lastName  = trim((string) ($googleUser['family_name'] ?? ''));
+
+        if ($firstName === '' && !empty($googleUser['name'])) {
+            $parts = preg_split('/\s+/', trim((string) $googleUser['name']), 2);
+            $firstName = $parts[0] ?? '';
+            $lastName  = $lastName !== '' ? $lastName : ($parts[1] ?? '');
+        }
+
+        if ($firstName === '') {
+            $firstName = explode('@', $email)[0];
+        }
+        if ($lastName === '') {
+            $lastName = 'Google';
+        }
+
+        // 3. Взимаме частта от имейла преди '@' с regex
+        $emailPrefix = preg_replace('/@.*$/', '', $email);
+        $firstName = $emailPrefix !== '' ? $emailPrefix : 'Потребител';
+        $lastName = '';
+
+        // Търсим съществуващ потребител или създаваме нов
         $user = $em->getRepository(User::class)->findOneBy(['email' => $email]);
+        $needsFlush = false;
 
         if (!$user) {
             $user = new User();
             $user->setEmail($email);
-            $user->setFirstName((string) ($googleUser['given_name'] ?? 'Потребител'));
-            $user->setLastName((string) ($googleUser['family_name'] ?? 'Google'));
+            $user->setFirstName($firstName);
+            $user->setLastName($lastName);
             $user->setRoles(['ROLE_USER']);
-            // Случайна силна парола (не се ползва при вход с Google)
             $user->setPassword($hasher->hashPassword($user, bin2hex(random_bytes(24))));
 
             $em->persist($user);
+            $needsFlush = true;
+        } elseif (trim((string) $user->getFirstName()) === '') {
+            $user->setFirstName($firstName);
+            $needsFlush = true;
+        }
+
+        if ($needsFlush) {
             $em->flush();
         }
 

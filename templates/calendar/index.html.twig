@@ -23,11 +23,6 @@
                 <span class="badge bg-warning text-dark fs-6">
                     Батарея общо: {{ batteryTotalHours }} ч.
                 </span>
-                {% if not hasData %}
-                    <a href="{{ path('app_seed_demo') }}" class="btn btn-sm btn-success">
-                        + Зареди тестови данни
-                    </a>
-                {% endif %}
             </div>
         </div>
     </nav>
