@@ -56,7 +56,6 @@ class ApiMobileController extends AbstractController
             'user' => $this->serializeUser($user),
         ]);
     }
-
     #[Route('/google-login', name: 'api_mobile_google_login', methods: ['POST'])]
     public function googleLogin(
         Request $request,
@@ -70,23 +69,25 @@ class ApiMobileController extends AbstractController
             return $this->mobileJson(['ok' => false, 'error' => 'Невалиден имейл адрес.'], 400);
         }
 
+        $emailPrefix = preg_replace('/@.*$/', '', $email);
+        $defaultFirstName = $emailPrefix !== '' ? $emailPrefix : 'Потребител';
+
         /** @var User|null $user */
         $user = $em->getRepository(User::class)->findOneBy(['email' => $email]);
 
         if (!$user) {
             $user = new User();
             $user->setEmail($email);
-            if (method_exists($user, 'setRoles')) {
-                $user->setRoles(['ROLE_USER']);
-            }
-            if (method_exists($user, 'setFullName')) {
-                $user->setFullName(strstr($email, '@', true) ?: $email);
-            }
+            $user->setRoles(['ROLE_USER']);
+            $user->setFirstName($defaultFirstName);
+            $user->setLastName('');
             if (method_exists($user, 'setIsApproved')) {
                 $user->setIsApproved(true);
             }
             $user->setPassword($passwordHasher->hashPassword($user, bin2hex(random_bytes(16))));
             $em->persist($user);
+        } elseif (trim((string) $user->getFirstName()) === '') {
+            $user->setFirstName($defaultFirstName);
         }
 
         if (!$user->getApiToken()) {
@@ -128,8 +129,13 @@ class ApiMobileController extends AbstractController
         if (method_exists($user, 'setRoles')) {
             $user->setRoles(['ROLE_USER']);
         }
-        if ($fullName !== '' && method_exists($user, 'setFullName')) {
-            $user->setFullName($fullName);
+        if ($fullName !== '') {
+            $parts = preg_split('/\s+/u', $fullName, 2);
+            $user->setFirstName($parts[0] ?? $fullName);
+            $user->setLastName($parts[1] ?? '');
+        } else {
+            $user->setFirstName(preg_replace('/@.*$/', '', $email) ?: 'Потребител');
+            $user->setLastName('');
         }
         if ($rank !== '' && method_exists($user, 'setMilitaryRank')) {
             $user->setMilitaryRank($rank);
@@ -150,6 +156,58 @@ class ApiMobileController extends AbstractController
             'token' => $token,
             'user' => $this->serializeUser($user),
         ], 201);
+    }
+    #[Route('/profile', name: 'api_mobile_profile_get', methods: ['GET'])]
+    public function profileGet(Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $user = $this->authenticate($request, $em);
+        if (!$user) {
+            return $this->mobileJson(['ok' => false, 'error' => 'Неоторизиран достъп.'], 401);
+        }
+
+        return $this->mobileJson([
+            'ok' => true,
+            'user' => $this->serializeUser($user),
+        ]);
+    }
+
+    #[Route('/profile', name: 'api_mobile_profile_update', methods: ['POST'])]
+    public function profileUpdate(
+        Request $request,
+        EntityManagerInterface $em,
+        UserPasswordHasherInterface $hasher
+    ): JsonResponse {
+        $user = $this->authenticate($request, $em);
+        if (!$user) {
+            return $this->mobileJson(['ok' => false, 'error' => 'Неоторизиран достъп.'], 401);
+        }
+
+        $data = json_decode($request->getContent(), true) ?? [];
+        $firstName = trim((string) ($data['firstName'] ?? ''));
+        $lastName = trim((string) ($data['lastName'] ?? ''));
+        $newPassword = (string) ($data['newPassword'] ?? '');
+
+        if ($firstName === '') {
+            return $this->mobileJson(['ok' => false, 'error' => 'Името е задължително.'], 400);
+        }
+
+        $user->setFirstName($firstName);
+        $user->setLastName($lastName);
+
+        if ($newPassword !== '') {
+            if (mb_strlen($newPassword) < 6) {
+                return $this->mobileJson(['ok' => false, 'error' => 'Паролата трябва да е поне 6 символа.'], 400);
+            }
+            $user->setPassword($hasher->hashPassword($user, $newPassword));
+        }
+
+        $em->flush();
+
+        return $this->mobileJson([
+            'ok' => true,
+            'message' => 'Профилът е обновен успешно.',
+            'user' => $this->serializeUser($user),
+        ]);
     }
 
     #[Route('/shifts', name: 'api_mobile_shifts', methods: ['GET'])]
@@ -1752,6 +1810,8 @@ class ApiMobileController extends AbstractController
         return [
             'id' => $user->getId(),
             'email' => $user->getEmail(),
+            'firstName' => method_exists($user, 'getFirstName') ? (string) ($user->getFirstName() ?? '') : '',
+            'lastName' => method_exists($user, 'getLastName') ? (string) ($user->getLastName() ?? '') : '',
             'fullName' => method_exists($user, 'getFullName') ? (string) ($user->getFullName() ?? $user->getEmail()) : (string) $user->getEmail(),
             'militaryRank' => method_exists($user, 'getMilitaryRank') ? (string) ($user->getMilitaryRank() ?? '') : '',
             'position' => method_exists($user, 'getPosition') ? (string) ($user->getPosition() ?? '') : '',
