@@ -38,9 +38,23 @@ class Task
     private ?\DateTimeImmutable $completedAt = null;
     #[ORM\Column(type: 'text', nullable: true)]
     private ?string $completionNote = null;
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $seenAt = null;
+
+
     public function __construct()
     {
         $this->createdAt = new \DateTimeImmutable();
+    }
+    public function getSeenAt(): ?\DateTimeImmutable
+    {
+        return $this->seenAt;
+    }
+
+    public function setSeenAt(?\DateTimeImmutable $seenAt): static
+    {
+        $this->seenAt = $seenAt;
+        return $this;
     }
     public function getCompletionNote(): ?string { return $this->completionNote; }
     public function setCompletionNote(?string $completionNote): static { $this->completionNote = $completionNote; return $this; }
