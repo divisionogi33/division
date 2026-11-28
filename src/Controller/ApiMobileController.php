@@ -1599,15 +1599,12 @@ class ApiMobileController extends AbstractController
             $items = [];
             foreach ($em->getRepository(LegendItem::class)->findBy([], ['code' => 'ASC']) as $l) {
                 $items[] = [
-                    'id' => $s->getId(),
-                    'code' => (string) $legend->getCode(),
-                    'name' => (string) $legend->getName(),
-                    'color' => (string) ($legend->getColorHex() ?? '#0D6EFD'),
-                    'userName' => $userName,
-                    'startDate' => $s->getStartDate()->format('Y-m-d'),
-                    'endDate' => $s->getEndDate()->format('Y-m-d'),
-                    'location' => (string) ($s->getLocation() ?? ''),
-                    'hours' => (float) $s->getCalculatedHours(),
+                    'id' => $l->getId(),
+                    'code' => (string) $l->getCode(),
+                    'name' => (string) $l->getName(),
+                    'colorHex' => (string) ($l->getColorHex() ?? '#0D6EFD'),
+                    'defaultDailyHours' => (float) $l->getDefaultDailyHours(),
+                    'multiplier' => (float) $l->getMultiplier(),
                 ];
             }
 
@@ -2086,9 +2083,8 @@ class ApiMobileController extends AbstractController
                     if ($cellVal === '') {
                         continue;
                     }
-                    $tokens = preg_split('/[\s,\/;\vert{}]+/u', mb_strtoupper($cellVal), -1, PREG_SPLIT_NO_EMPTY);
-                    $dateObj = new \DateTimeImmutable(sprintf('\%04d-\%02d-\%02d 00:00:00',$year, $monthNum,$dayNum));
-
+                    $tokens = preg_split('/[\s,\/;|]+/u', mb_strtoupper($cellVal), -1, PREG_SPLIT_NO_EMPTY);
+                    $dateObj = new \DateTimeImmutable(sprintf('%04d-%02d-%02d 00:00:00', $year, $monthNum, $dayNum));
                     foreach ($tokens as$code) {
                         if (!isset($legendMap[$code])) {
                             continue;
