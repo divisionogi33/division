@@ -105,6 +105,11 @@
                                                             <th>Възложена</th>
                                                             <th>За кога</th>
                                                             <th>Статус</th>
+                                                            {% if task.seenAt %}
+                                                                <div class="small text-success mt-1">👁 Видяна ({{ task.seenAt|date('d.m H:i') }})</div>
+                                                            {% elseif not task.isCompleted %}
+                                                                <div class="small text-muted mt-1">Непрочетена</div>
+                                                            {% endif %}
                                                         </tr>
                                                         </thead>
                                                         <tbody>

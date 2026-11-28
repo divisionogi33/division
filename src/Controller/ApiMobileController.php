@@ -209,7 +209,6 @@ class ApiMobileController extends AbstractController
             'user' => $this->serializeUser($user),
         ]);
     }
-
     #[Route('/shifts', name: 'api_mobile_shifts', methods: ['GET'])]
     public function shifts(
         Request $request,
@@ -272,14 +271,14 @@ class ApiMobileController extends AbstractController
 
             $items[] = [
                 'id' => $s->getId(),
-                'userName' => $userName,
                 'code' => (string) $legend->getCode(),
                 'name' => (string) $legend->getName(),
                 'color' => (string) ($legend->getColorHex() ?? '#0D6EFD'),
+                'userName' => $userName,
                 'startDate' => $s->getStartDate()->format('Y-m-d'),
                 'endDate' => $s->getEndDate()->format('Y-m-d'),
-                'hours' => (float) $s->getCalculatedHours(),
                 'location' => (string) ($s->getLocation() ?? ''),
+                'hours' => (float) $s->getCalculatedHours(),
             ];
         }
 
@@ -870,14 +869,38 @@ class ApiMobileController extends AbstractController
                 'id' => $t->getId(),
                 'title' => $t->getTitle(),
                 'description' => $t->getDescription() ?? '',
+                'createdAt' => method_exists($t, 'getCreatedAt') && $t->getCreatedAt()
+                    ? $t->getCreatedAt()->format('d.m.Y H:i') : '',
                 'dueDate' => $t->getDueDate()?->format('d.m.Y H:i') ?? 'Без срок',
+                'isSeen' => $t->getSeenAt() !== null,
                 'isCompleted' => $t->isCompleted(),
             ];
         }
 
         return $this->mobileJson(['ok' => true, 'tasks' => $items]);
     }
+    #[Route('/tasks/mark-seen', name: 'api_mobile_tasks_mark_seen', methods: ['POST'])]
+    public function markTasksSeen(Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $user = $this->authenticate($request, $em);
+        if (!$user) {
+            return $this->mobileJson(['ok' => false, 'error' => 'Неоторизиран достъп.'], 401);
+        }
 
+        $tasks = $em->getRepository(Task::class)->findBy([
+            'assignedTo' => $user,
+            'isCompleted' => false,
+            'seenAt' => null,
+        ]);
+
+        $now = new \DateTimeImmutable();
+        foreach ($tasks as $t) {
+            $t->setSeenAt($now);
+        }
+        $em->flush();
+
+        return $this->mobileJson(['ok' => true, 'marked' => count($tasks)]);
+    }
     #[Route('/tasks/{id}/complete', name: 'api_mobile_task_complete', methods: ['POST'])]
     public function completeTask(
         Task $task,
@@ -1324,6 +1347,12 @@ class ApiMobileController extends AbstractController
                 100
             );
 
+            $bgMonths = [
+                1 => 'Януари', 2 => 'Февруари', 3 => 'Март', 4 => 'Април',
+                5 => 'Май', 6 => 'Юни', 7 => 'Юли', 8 => 'Август',
+                9 => 'Септември', 10 => 'Октомври', 11 => 'Ноември', 12 => 'Декември',
+            ];
+
             $items = [];
             foreach ($tasks as $t) {
                 $u = $t->getAssignedTo();
@@ -1331,12 +1360,30 @@ class ApiMobileController extends AbstractController
                 if ($uLabel === '' && $u) {
                     $uLabel = (string) $u->getEmail();
                 }
+
+                $refDate = $t->getDueDate() ?? (method_exists($t, 'getCreatedAt') ? $t->getCreatedAt() : null) ?? new \DateTimeImmutable();
+                $monthLabel = ($bgMonths[(int) $refDate->format('n')] ?? $refDate->format('m')) . ' ' . $refDate->format('Y') . ' г.';
+
+                $weekStart = $refDate->modify('monday this week');
+                $weekEnd = $weekStart->modify('+6 days');
+                $weekLabel = sprintf(
+                    'Седмица %s (%s – %s)',
+                    $refDate->format('W'),
+                    $weekStart->format('d.m'),
+                    $weekEnd->format('d.m')
+                );
+
                 $items[] = [
                     'id' => $t->getId(),
                     'userName' => $uLabel,
                     'title' => (string) $t->getTitle(),
                     'description' => (string) ($t->getDescription() ?? ''),
+                    'createdAt' => method_exists($t, 'getCreatedAt') && $t->getCreatedAt()
+                        ? $t->getCreatedAt()->format('d.m.Y H:i') : '',
                     'dueDate' => $t->getDueDate()?->format('d.m.Y H:i') ?? 'Без срок',
+                    'seenAt' => $t->getSeenAt()?->format('d.m H:i') ?? '',
+                    'monthLabel' => $monthLabel,
+                    'weekLabel' => $weekLabel,
                     'isCompleted' => (bool) $t->isCompleted(),
                     'completionNote' => method_exists($t, 'getCompletionNote') ? (string) ($t->getCompletionNote() ?? '') : '',
                 ];
@@ -1552,12 +1599,15 @@ class ApiMobileController extends AbstractController
             $items = [];
             foreach ($em->getRepository(LegendItem::class)->findBy([], ['code' => 'ASC']) as $l) {
                 $items[] = [
-                    'id' => $l->getId(),
-                    'code' => (string) $l->getCode(),
-                    'name' => (string) $l->getName(),
-                    'colorHex' => (string) ($l->getColorHex() ?? '#0D6EFD'),
-                    'defaultDailyHours' => (float) $l->getDefaultDailyHours(),
-                    'multiplier' => (float) $l->getMultiplier(),
+                    'id' => $s->getId(),
+                    'code' => (string) $legend->getCode(),
+                    'name' => (string) $legend->getName(),
+                    'color' => (string) ($legend->getColorHex() ?? '#0D6EFD'),
+                    'userName' => $userName,
+                    'startDate' => $s->getStartDate()->format('Y-m-d'),
+                    'endDate' => $s->getEndDate()->format('Y-m-d'),
+                    'location' => (string) ($s->getLocation() ?? ''),
+                    'hours' => (float) $s->getCalculatedHours(),
                 ];
             }
 
@@ -1779,11 +1829,8 @@ class ApiMobileController extends AbstractController
 
     private function mobileJson(array $data, int $status = 200): JsonResponse
     {
-        $response = $this->json($data, $status);
-        $response->headers->set('Content-Length', (string) strlen((string) $response->getContent()));
-        return $response;
+        return $this->json($data, $status);
     }
-
     private function authenticate(Request $request, EntityManagerInterface $em): ?User
     {
         $authHeader = (string) $request->headers->get('Authorization', '');
